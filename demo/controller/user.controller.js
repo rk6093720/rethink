@@ -3,145 +3,131 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose")
   const india = require("india-state-district");
-// const firebaseAdmin = require("firebase-admin")
 const { sendMsg91Sms } = require("../utils/twilosms");
-// const { OtpModal } = require("../modals/otp.modals");
+const { messaging } = require("firebase-admin");
+const { tokenModal } = require("../modals/tokenblacklist.modal");
+const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.com$/;
+
+const validateEmail = (email) => {
+  return emailRegex.test(email);
+};
+
 const RegisterUser = async (req, res) => {
+      const { email, password, phone } = req.body;
+      // console.log(`${email } ${password.length} ${phone}`)
+        if (!email || !password || !phone ) {
+      return res.status(400).json({success: false,message: "Email and Password , phone fields are required"});
+    }
+    if( password.length < 6){
+      return res.status(404).json({success: false, message:"please put password more than 6 or equal to 6"})
+    }
+    if(phone.length < 10){
+      return res.status(404).json({success:false, message:`${phone } number is invalid`})
+    }
+     if(!validateEmail(email)){
+      return res.status(400).json({success: false, message:`${email} Invalid`})
+     }
   try {
-    // const { id } = req.params;
-    const { fullName, state, district, password, phoneNumber } = req.body;
-
-    // 🔹 Validate fields
-    if (!fullName || !state || !district || !password || !phoneNumber) {
-      return res.status(400).json({
-        success: false,
-        message: "All fields are required",
-      });
-    }
-
+        const normalizedEmail = email.toLowerCase().trim();
     // 🔹 Check phone number duplication (exclude current user)
-    const phoneExists = await UserAuthModal.findOne({
-      phoneNumber
-    });
-
-    if (phoneExists) {
-      return res.status(400).json({
-        success: false,
-        message: "Phone number already exists",
-      });
+    const emailExists = await UserAuthModal.findOne({email });
+    if (emailExists) {
+      return res.status(409).json({success: false,message: `${email} already exists`  });
     }
-
     // 🔹 Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
-
     // 🔹 Update existing user
-    const  newuser = new UserAuthModal({
-      fullName,
-      state,
-      district,
-      password:hashedPassword,
-      phoneNumber
-    })
-
-    await newuser.save();
- 
-    // 🔹 Generate JWT
-    const jwtToken = jwt.sign(
-      {  phoneNumber },
-      process.env.JWT_SECRET,
-      { expiresIn: "2y" }
-    );
-
-    // 🔹 Response
-    res.status(200).json({
-      success: true,
-      message: "User registered successfully",
-      newuser,
-      jwtToken
+    const newUser = await UserAuthModal.create({
+      email: normalizedEmail,
+      phone,
+      password: hashedPassword,
+      status: "active",
+      isloginwithMobile: false,
+      isloginwithGoogle: false,
+      isloginwithEmail: false
     });
+    await newUser.save();
+    // 🔹 Generate JWT
+    // const jwtToken = jwt.sign( {  email, userId: newUser._id }, process.env.JWT_SECRET,{ expiresIn: "2y" });
+    // 🔹 Response
+    return res.status(200).json({success: true,message: "User registered successfully", newUser});
 
   } catch (err) {
-    console.error("Register Error:", err);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: err.message,
+    // console.error("Register Error:", err);
+   return res.status(500).json({success: false, message: "Server error", error: err.message,
     });
   }
-};
-                        
+};                    
 const LoginUser = async (req, res) => {
-  const { phoneNumber, password } = req?.body;
+  const { email, password } = req.body;
+  console.log("email",`${email}- ${password}`); 
   try {
-    if (password) {
-      const user = await UserAuthModal.findOne({
-        phoneNumber
-      });
+      const user = await UserAuthModal.findOne({email});
+      console.log("user",user)
       if (!user) {
-        return res.status(400).json({ message: "Invalid phoneNumber" });
+        return res.status(400).json({ message: `Invalid ${email}` });
       }
-
       const isMatch = await bcrypt.compare(password, user.password);
       if (!isMatch) {
         return res.status(400).json({ message: "Invalid password" });
       }
-
-      const token = jwt.sign(
-        { userId: user._id },
-        process.env.JWT_SECRET,
-        { expiresIn: "2y" }
-      );
-
-      return res.status(200).json({
-        status:"success",
-        message: "Login successful",
+      const token = jwt.sign({ userId: user._id },process.env.JWT_SECRET,{ expiresIn: "2m" });
+      return res.status(200).json({status:"success",message: "Login successful",
         user: {
           uid: user._id,
-          phoneNumber: user.phoneNumber,
-          verifytoken: token,
-          token
+          email: user.email,
+          name : `${user.firstName}`,
+          Mobile:user.isloginwithMobile === false ? false : true ,
+          Google: user.isloginwithGoogle === false ? false : true,
+          Email: user.isloginwithEmail !== false ? false : true,
+          verifytoken: token
         }
       });
-    }
-    return res.status(400).json({ message: "Phone number or password required" });
-  } catch (error) {
+      } catch (error) {
     res.status(500).json({ status:"failed",message: "Server error" });
   }
 };
-const verifylogin = async (req, res) => {
+
+//login with Google 
+const loginwithGoogle = async(req,res)=>{
+
+}
+// login with Mobile and Otp 
+ const loginwithmobile = async (req, res) => {
   try {
-    const { phoneNumber } = req.body;
-    // 1️⃣ Validation
-    if (!phoneNumber) {
-      return res.status(400).json({
-        success: false,
-        message: "Phone number is required",
-      });
+    const { phone } = req.body;
+    console.log(req.userId)
+    if (!phone) {
+      return res.status(400).json({success: false,message: "Phone is required" });
     }
-
-    // 2️⃣ Check user exists   
-    const user = await UserAuthModal.findOne({ phoneNumber });
-
-    // 3️⃣ Response based on user existence
-    if (!user) {
-      return res.status(200).json({
-        Status: "success",
-        type: "signup",
-        message: "User not found, proceed to signup",
-      });
-    }
+     const existphone = await UserAuthModal.findOne({phone});
+     if(existphone){
+      return res.status(400).json({success:false, message:`${phone} already exist here `})
+     }
+    const user = await UserAuthModal.findByIdAndUpdate(
+      req.userId,                         // 👈 current user (or use userId)
+      {
+        phone: phone,
+        isloginwithMobile: true
+      },
+      {
+        new: true,
+        upsert: true
+      }
+    );
+    console.log("UPDATED USER:", user); // 👈 debug
 
     return res.status(200).json({
-      Status:"success",
-      type: "login",
-      message: "User found, proceed to login",
-      userId: user._id, // frontend ke kaam aa sakta hai
+      success: true,
+      message: "Phone updated successfully",
+      user
     });
 
   } catch (error) {
+    console.error("ERROR:", error);
     return res.status(500).json({
-      Status: "failed",
-      message: "Server error",
+      success: false,
+      message: error.message
     });
   }
 };
@@ -150,14 +136,14 @@ const verifylogin = async (req, res) => {
 // send otp handler
 const SendOtpVerification = async (req, res) => {
   try {
-    const { phoneNumber } = req.body;
-    if (!phoneNumber) {
+    const { phone } = req.body;
+    if (!phone) {
       return res.status(400).json({ message: "Phone number required" });
     }
     // 🔍 STEP 1: Check phone in DB
-    const user = await UserAuthModal.findOne({ phoneNumber });
+    const user = await UserAuthModal.findOne({ phone });
     if(!user){
-      return res.status(404).json({ message:`${phoneNumber} not found`})
+      return res.status(404).json({ message:`${phone} not found`})
     }
     // 🔐 STEP 2: Generate OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -165,11 +151,11 @@ const SendOtpVerification = async (req, res) => {
 
     // 💾 STEP 3: Save OTP
     await UserAuthModal.findOneAndUpdate(
-      { phoneNumber },
+      { phone },
       { otp, expiresAt }
     );
 
-    console.log(`OTP for ${phoneNumber}: ${otp}`);
+    console.log(`OTP for ${phone}: ${otp}`);
 
     // 📤 STEP 4: Response
     return res.status(200).json({
@@ -187,9 +173,9 @@ const SendOtpVerification = async (req, res) => {
 
 const handleOtpVerification = async (req, res) => {
   try {
-    const { phoneNumber, otp } = req.body;
+    const { phone, otp } = req.body;
 
-    const user = await UserAuthModal.findOne({ phoneNumber });
+    const user = await UserAuthModal.findOne({ phone });
     if (!user) {
       return res.status(400).json({ message: "User not found" });
     }
@@ -230,9 +216,9 @@ const handleOtpVerification = async (req, res) => {
 
 const ReSendOtpVerification = async (req, res) => {
   try {
-    const { phoneNumber } = req.body;
+    const { phone } = req.body;
 
-    const user = await UserAuthModal.findOne({ phoneNumber });
+    const user = await UserAuthModal.findOne({ phone });
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
@@ -243,7 +229,7 @@ const ReSendOtpVerification = async (req, res) => {
     user.expiresAt = Date.now() + 5 * 60 * 1000;
     await user.save();
 
-    console.log(`Resent OTP ${otp} to ${phoneNumber}`);
+    console.log(`Resent OTP ${otp} to ${phone}`);
 
     res.status(200).json({ message: "OTP resent successfully" });
 
@@ -254,50 +240,67 @@ const ReSendOtpVerification = async (req, res) => {
 
 const logoutUser = async (req, res) => {
   try {
-    const { id } = req.params;
-    res.status(200).json({
-      message: `User with ID ${id} logged out successfully`,
+    const userId = req.userId;      // from auth middleware
+    const expiretime = req.exp;     // jwt expiry
+    const token = req.token;        // current token
+
+    if (!userId || !token) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized request"
+      });
+    }
+
+    // 🔹 Find user
+    const user = await UserAuthModal.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+    // 🔹 Detect login type & cleanup
+    if (user.isloginwithMobile) {
+      user.logoutType = "Mobile";
+      user.phone = null; // 🔥 remove phone on logout
+    }
+
+    if (user.isloginwithEmail) user.logoutType = "Email";
+    if (user.isloginwithGoogle) user.logoutType = "Google";
+
+    // 🔹 Reset all login flags
+    user.isloginwithMobile = false;
+    user.isloginwithEmail = false;
+    user.isloginwithGoogle = false;
+
+    await user.save();
+
+    // 🔹 Blacklist token
+    await tokenModal.create({
+      token,
+      expiresAt: new Date(expiretime * 1000)
     });
+
+    return res.status(200).json({
+      success: true,
+      message: `Logout successful from ${user.logoutType} `
+    });
+
   } catch (error) {
-    console.log(error);
-    res.status(500).json({ message: "Server error", error });
+    return res.status(500).json({ success: false, message: "Server error"});
   }
 };
-
-// const getPhoneNumber = async (req, res) => {
-//   try {
-//     // Check if user exists
-//     const phoneNumber = req.body.phoneNumber;
-//     const user = await UserAuthModal.findOne({ phoneNumber });
-//     if (user) {
-//       // User exists → Go to login page
-//       return res.status(200).json({
-//         status: "EXISTS",
-//         message: "User found. Redirect to login.",
-//         user,
-//       });
-//     } else {
-//       // User does NOT exist → Go to signup page
-//       return res.status(200).json({
-//         status: "NOT_EXISTS",
-//         message: "User not found. Redirect to signup.",
-//       });
-//     }
-//   } catch (error) {
-//     console.log(error);
-//     res.status(500).json({ message: "Server error", error });
-//   }
-// };
 
 // forget password handler
 const forgetPassword = async (req, res) => {
   try {
-    const { phoneNumber } = req.body;
-    if (!phoneNumber) {
+    const { phone } = req.body;
+    if (!phone) {
       return res.status(400).json({ message: "Phone number is required" });
     }
     // 1. Check if user exists
-    const user = await UserAuthModal.findOne({ phoneNumber });
+    const user = await UserAuthModal.findOne({ phone });
     if (!user) {
       return res.status(404).json({ message: "User does not exist" });
     }
@@ -305,21 +308,21 @@ const forgetPassword = async (req, res) => {
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     // 3. Save OTP to user record
     user.otp = otp;
-    user.otpExpiry = Date.now() + 15 * 60 * 1000; // 15 minutes
+    user.otpExpire = Date.now() + 15 * 60 * 1000; // 15 minutes
     // 4. Send OTP SMS using Fast2SMS DLT
     // await sendDLTSms({
     //   templateId: process.env.DLT_TEMPLATE_ID_FORGOT,
     //   variables: otp,
-    //   numbers: phoneNumber,
+    //   numbers: phone,
     // });
-    console.log(`forgetotp to send ${phoneNumber} : ${otp}`)
+    console.log(`forgetotp to send ${phone} : ${otp}`)
     const token = jwt.sign({userId:user._id},process.env.JWT_SECRET);
     // console.log(token)
     user.verifytoken=token;
     await user.save();
     // 4. Send OTP SMS using Twilio
     await sendMsg91Sms({
-      mobiles: `+91${phoneNumber}`, // only digits, no +91 required
+      mobiles: `+91${phone}`, // only digits, no +91 required
       message: `Your password reset OTP is: ${otp}`,
       token
     });
@@ -373,9 +376,9 @@ const getStatesRead = (req, res) => {
 
 const verifyforgetpwd = async (req, res) => {
 
-  const { phoneNumber, otp } = req.body;
+  const { phone, otp } = req.body;
 
-  const record = await UserAuthModal.findOne({ phoneNumber }).sort({ createdAt: -1 });
+  const record = await UserAuthModal.findOne({ phone }).sort({ createdAt: -1 });
 
   if (!record) return res.status(400).json({ message: "OTP not found" });
 
@@ -438,7 +441,7 @@ const resetPassword = async (req, res) => {
 
     return res.status(200).json({
       status: "Password reset successful",
-      phoneNumber: verify.phoneNumber,
+      phone: verify.phone,
       id: oldUser._id,
     });
 
@@ -448,59 +451,6 @@ const resetPassword = async (req, res) => {
   }
 };
 
-const PhoneNumbercrete = async (req, res) => {
-   const { phoneNumber } = req?.body;
-  try {
-    // console.log("phoneNumber:", phoneNumber);
-    if (!phoneNumber) {
-      return res.status(400).json({ message: "Phone number required" });
-    }
-    // 🔍 STEP 1: Check phone in DB
-    const user = await UserAuthModal.findOne({ phoneNumber });
-
-    if (user) {
-      return res.status(400).json({ message: "Phone number already exists" , type:"login" });
-    }
-
-
-    // 🔍 STEP 2: Create new user
-    const newUser = await UserAuthModal.create({ phoneNumber });
-    const Otp = Math.floor(100000 + Math.random() * 900000).toString();
-    newUser.otp = Otp;
-    await newUser.save();
-
-    console.log(`OTP for ${phoneNumber}: ${Otp}`);
-
-    return res.status(201).json({
-      status: "success",
-      message: "Phone number created successfully",
-      data: newUser,
-    });
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({ status: "Something Went Wrong" });
-  }
-};
-
-
-const verifyphoneotp = async (req,res) =>{
-  try {
-    const {phoneNumber, otp} = req.body;
-    const record = await UserAuthModal.findOne({phoneNumber});
-    if(record.otp !== otp){
-      return res.status(400).json({message:`${otp} is invalid`});
-    }
-    if(Date.now() > record.otpExpiry){
-      return res.status(400).json({message:"OTP expired"});
-    }
-    record.otp = undefined;
-    record.otpExpiry = undefined;
-    await record.save();
-    return res.status(200).json({message:"phone otp is verified successfully"});
-  } catch (error) {
-    return res.status(500).json({message:"Server error"})
-  }
-}
 module.exports = {
   RegisterUser,
   LoginUser,
@@ -508,11 +458,10 @@ module.exports = {
   SendOtpVerification,
   ReSendOtpVerification,
   logoutUser,
-  PhoneNumbercrete,
   forgetPassword,
   resetPassword,
   verifyforgetpwd,
-  verifylogin,
   getStatesRead,
-  verifyphoneotp
+  loginwithGoogle,
+  loginwithmobile
 }
