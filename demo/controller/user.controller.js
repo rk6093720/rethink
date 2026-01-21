@@ -2,10 +2,10 @@ const { UserAuthModal } = require("../modals/user.modals");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose")
-  const india = require("india-state-district");
+const india = require("india-state-district");
 const { sendMsg91Sms } = require("../utils/twilosms");
 const { messaging } = require("firebase-admin");
-const { tokenModal } = require("../modals/tokenblacklist.modal");
+const { tokenModal } = require("../modals/tokenblacklist.modals.js");
 const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.com$/;
 
 const validateEmail = (email) => {
@@ -13,26 +13,26 @@ const validateEmail = (email) => {
 };
 
 const RegisterUser = async (req, res) => {
-      const { email, password, phone } = req.body;
-      // console.log(`${email } ${password.length} ${phone}`)
-        if (!email || !password || !phone ) {
-      return res.status(400).json({success: false,message: "Email and Password , phone fields are required"});
-    }
-    if( password.length < 6){
-      return res.status(404).json({success: false, message:"please put password more than 6 or equal to 6"})
-    }
-    if(phone.length < 10){
-      return res.status(404).json({success:false, message:`${phone } number is invalid`})
-    }
-     if(!validateEmail(email)){
-      return res.status(400).json({success: false, message:`${email} Invalid`})
-     }
+  const { email, password, phone } = req.body;
+  // console.log(`${email } ${password.length} ${phone}`)
+  if (!email || !password || !phone) {
+    return res.status(400).json({ success: false, message: "Email and Password , phone fields are required" });
+  }
+  if (password.length < 6) {
+    return res.status(404).json({ success: false, message: "please put password more than 6 or equal to 6" })
+  }
+  if (phone.length < 10) {
+    return res.status(404).json({ success: false, message: `${phone} number is invalid` })
+  }
+  if (!validateEmail(email)) {
+    return res.status(400).json({ success: false, message: `${email} Invalid` })
+  }
   try {
-        const normalizedEmail = email.toLowerCase().trim();
+    const normalizedEmail = email.toLowerCase().trim();
     // 🔹 Check phone number duplication (exclude current user)
-    const emailExists = await UserAuthModal.findOne({email });
+    const emailExists = await UserAuthModal.findOne({ email });
     if (emailExists) {
-      return res.status(409).json({success: false,message: `${email} already exists`  });
+      return res.status(409).json({ success: false, message: `${email} already exists` });
     }
     // 🔹 Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -50,62 +50,63 @@ const RegisterUser = async (req, res) => {
     // 🔹 Generate JWT
     // const jwtToken = jwt.sign( {  email, userId: newUser._id }, process.env.JWT_SECRET,{ expiresIn: "2y" });
     // 🔹 Response
-    return res.status(200).json({success: true,message: "User registered successfully", newUser});
+    return res.status(200).json({ success: true, message: "User registered successfully", newUser });
 
   } catch (err) {
     // console.error("Register Error:", err);
-   return res.status(500).json({success: false, message: "Server error", error: err.message,
+    return res.status(500).json({
+      success: false, message: "Server error", error: err.message,
     });
   }
-};                    
+};
 const LoginUser = async (req, res) => {
   const { email, password } = req.body;
-  console.log("email",`${email}- ${password}`); 
   try {
-      const user = await UserAuthModal.findOne({email});
-      console.log("user",user)
-      if (!user) {
-        return res.status(400).json({ message: `Invalid ${email}` });
-      }
-      const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch) {
-        return res.status(400).json({ message: "Invalid password" });
-      }
-      const token = jwt.sign({ userId: user._id },process.env.JWT_SECRET,{ expiresIn: "2m" });
-      return res.status(200).json({status:"success",message: "Login successful",
-        user: {
-          uid: user._id,
-          email: user.email,
-          name : `${user.firstName}`,
-          Mobile:user.isloginwithMobile === false ? false : true ,
-          Google: user.isloginwithGoogle === false ? false : true,
-          Email: user.isloginwithEmail !== false ? false : true,
-          verifytoken: token
-        }
-      });
-      } catch (error) {
-    res.status(500).json({ status:"failed",message: "Server error" });
+    const user = await UserAuthModal.findOne({ email });
+    // console.log("user",user)
+    if (!user) {
+      return res.status(400).json({ message: `Invalid ${email}` });
+    }
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Invalid password" });
+    }
+    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: "2m" });
+    user.isloginwithEmail = true;
+    const loginwithemailuser = {
+      uid: user._id,
+      email: user.email,
+      name: `${user.firstName}`,
+      Mobile: user.isloginwithMobile,
+      Google: user.isloginwithGoogle,
+      Email: user.isloginwithEmail,
+      tokenData: user.verifytoken == null ? token : null
+    }
+    await user.save();
+    return res.status(200).json({ status: "success", message: "Login successful", loginwithemailuser });
+  } catch (error) {
+    res.status(500).json({ status: "failed", message: "Server error" });
   }
 };
 
 //login with Google 
-const loginwithGoogle = async(req,res)=>{
+const loginwithGoogle = async (req, res) => {
 
 }
 // login with Mobile and Otp 
- const loginwithmobile = async (req, res) => {
+const loginwithmobile = async (req, res) => {
   try {
     const { phone } = req.body;
     console.log(req.userId)
     if (!phone) {
-      return res.status(400).json({success: false,message: "Phone is required" });
+      return res.status(400).json({ success: false, message: "Phone is required" });
     }
-     const existphone = await UserAuthModal.findOne({phone});
-     if(existphone){
-      return res.status(400).json({success:false, message:`${phone} already exist here `})
-     }
-    const user = await UserAuthModal.findByIdAndUpdate(
-      req.userId,                         // 👈 current user (or use userId)
+    const existphone = await UserAuthModal.findOne({ phone });
+    if (existphone) {
+      return res.status(400).json({ success: false, message: `${phone} already exist here ` })
+    }
+    const user = await UserAuthModal.findOneAndUpdate(
+      {},                         // 👈 current user (or use userId)
       {
         phone: phone,
         isloginwithMobile: true
@@ -142,8 +143,8 @@ const SendOtpVerification = async (req, res) => {
     }
     // 🔍 STEP 1: Check phone in DB
     const user = await UserAuthModal.findOne({ phone });
-    if(!user){
-      return res.status(404).json({ message:`${phone} not found`})
+    if (!user) {
+      return res.status(404).json({ message: `${phone} not found` })
     }
     // 🔐 STEP 2: Generate OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -159,7 +160,7 @@ const SendOtpVerification = async (req, res) => {
 
     // 📤 STEP 4: Response
     return res.status(200).json({
-      message: "OTP sent successfully" ,
+      message: "OTP sent successfully",
       status: "success",
     });
 
@@ -187,7 +188,7 @@ const handleOtpVerification = async (req, res) => {
     if (Date.now() > user.expiresAt) {
       return res.status(400).json({ message: "OTP expired" });
     }
-  
+
     // 🔐 Generate verify token
     const verifyToken = jwt.sign(
       { userId: user._id },
@@ -265,9 +266,10 @@ const logoutUser = async (req, res) => {
       user.logoutType = "Mobile";
       user.phone = null; // 🔥 remove phone on logout
     }
-
-    if (user.isloginwithEmail) user.logoutType = "Email";
-    if (user.isloginwithGoogle) user.logoutType = "Google";
+    if (user.isloginwithEmail) {
+      user.logoutType = "Email";
+    }
+    if (user.isloginwithGoogle) { user.logoutType = "Google"; }
 
     // 🔹 Reset all login flags
     user.isloginwithMobile = false;
@@ -288,7 +290,7 @@ const logoutUser = async (req, res) => {
     });
 
   } catch (error) {
-    return res.status(500).json({ success: false, message: "Server error"});
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
@@ -316,9 +318,9 @@ const forgetPassword = async (req, res) => {
     //   numbers: phone,
     // });
     console.log(`forgetotp to send ${phone} : ${otp}`)
-    const token = jwt.sign({userId:user._id},process.env.JWT_SECRET);
+    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET);
     // console.log(token)
-    user.verifytoken=token;
+    user.verifytoken = token;
     await user.save();
     // 4. Send OTP SMS using Twilio
     await sendMsg91Sms({
@@ -329,7 +331,7 @@ const forgetPassword = async (req, res) => {
     return res.status(200).json({
       status: "success",
       message: "we sent to verification code", user,
-      verifytoken:token
+      verifytoken: token
     });
   } catch (error) {
     console.error(error);
@@ -363,7 +365,7 @@ const getStatesRead = (req, res) => {
     res.status(200).json({
       status: "success",
       totalStates: data.length,
-      state:{ data},
+      state: { data },
     });
   } catch (error) {
     console.error(error);
