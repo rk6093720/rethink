@@ -1,5 +1,4 @@
 const jwt = require("jsonwebtoken");
-const { UserAuthModal } = require("../modals/user.modals");
 const auth=async (req,res,next)=>{
     try {
         const token=req.headers.authorization;
@@ -12,8 +11,10 @@ const auth=async (req,res,next)=>{
             
         }
         const user =jwt.verify(userToken,process.env.JWT_SECRET);
-        // console.log("user",user;
-                    req.userId=user.userId;      
+        console.log("user",user);
+                    req.userId=user.userId;   
+                    req.exp = user.exp;  
+                    req.token = userToken;
         next();
     } catch (error) {
         console.log(error);
