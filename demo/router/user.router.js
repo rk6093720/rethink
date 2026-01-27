@@ -1,29 +1,100 @@
-const { Router } = require('express');
-const { RegisterUser, LoginUser, handleOtpVerification ,SendOtpVerification, ReSendOtpVerification, logoutUser, forgetPassword, resetPassword,  verifylogin, verifyforgetpwd, getStatesRead, PhoneNumbercrete, verifyphoneotp, loginwithGoogle, loginwithmobile } = require('../controller/user.controller');
-const { auth } = require('../middleware/user.middleware');
+const { Router } = require("express");
+const passport = require("passport");
+const {
+    RegisterUser,
+    LoginUser,
+    loginwithmobile,
+    handleOtpVerification,
+    ReSendOtpVerification,
+    logoutUser,
+    forgetPassword,
+    resetPassword,
+    verifyforgetpwd,
+    getStatesRead,
+    loginwithGoogle,
+    UserProfile,
+    updateProfile
+} = require("../controller/user.controller");
+
+const { auth } = require("../middleware/user.middleware");
+const { loginLimiter, otpLimiter } = require("../middleware/ratelimit");
+
 const userRouter = Router();
-// Define user-related routes here
-userRouter.post('/register', RegisterUser);
-// login route
-userRouter.post('/login', LoginUser);
-// login with Google
-userRouter.post("/login/g",loginwithGoogle);
-// login with mobile
-userRouter.post("/login/p",loginwithmobile);
-// verrify otp route can be added here 
-userRouter.post('/verifyotp', handleOtpVerification);
-// send otp route can be added here
-userRouter.post('/sendotp', SendOtpVerification);
-// resend otp route can be added here
-userRouter.post('/resendotp', ReSendOtpVerification);
-// logout  route can be added here
-userRouter.post("/logout",auth, logoutUser);
-// userRouter.post('/resetpassword', resetPassword)
+
+/* =========================
+   EMAIL / PASSWORD
+========================= */
+
+// Register
+userRouter.post("/register", RegisterUser);
+                     
+// Login with Email + Password
+userRouter.post("/login",loginLimiter, LoginUser);
+
+
+/* =========================
+   MOBILE + OTP
+========================= */
+
+// Login with Mobile (send OTP)
+userRouter.post("/login/p",loginLimiter, loginwithmobile);
+
+// Verify Mobile OTP
+userRouter.post("/verifyotp",otpLimiter, handleOtpVerification);
+
+// Resend OTP
+userRouter.post("/resendotp",otpLimiter, ReSendOtpVerification);
+
+/* =========================
+   GOOGLE LOGIN (PASSPORT)
+========================= */
+
+// STEP 1: Redirect to Google
+userRouter.get(
+    "/google",
+    passport.authenticate("google", {
+        scope: ["profile", "email"],
+        session: false
+    })
+);
+
+// STEP 2: Google callback
+userRouter.get(
+    "/google/callback",
+    passport.authenticate("google", {
+        session: false,
+        failureRedirect: "http://localhost:3000/login"
+    }),
+    loginwithGoogle // controller
+);
+
+/* =========================
+   LOGOUT
+========================= */
+
+userRouter.post("/logout", auth, logoutUser);
+
+/* =========================
+   FORGOT / RESET PASSWORD
+========================= */
+
+// Send forgot password OTP
 userRouter.post("/forgetpassword", forgetPassword);
 
-userRouter.post("/resetpassword/:_id/:token", resetPassword);
-// userRouter.get("/resetpassword/:_id/:token", getResetPasswordToken);
+// Verify forgot password OTP
 userRouter.post("/verifyforgototp", verifyforgetpwd);
 
-userRouter.get("/states/read", getStatesRead)
-module.exports = {userRouter};
+// Reset password
+userRouter.post("/resetpassword/:_id/:token", resetPassword);
+
+/* =========================
+   OTHER
+========================= */
+
+userRouter.get("/states/read", getStatesRead);
+// profile 
+userRouter.get("/profile", auth, UserProfile);
+// update profile 
+userRouter.put("/update/profile/:id",updateProfile)
+
+module.exports = { userRouter };

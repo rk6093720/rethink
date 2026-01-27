@@ -13,10 +13,10 @@ const validateEmail = (email) => {
 };
 
 const RegisterUser = async (req, res) => {
-  const { email, password, phone } = req.body;
+  const { firstName, lastName, email, password, phone } = req.body;
   // console.log(`${email } ${password.length} ${phone}`)
-  if (!email || !password || !phone) {
-    return res.status(400).json({ success: false, message: "Email and Password , phone fields are required" });
+  if (!email || !password || !phone || !firstName || !lastName) {
+    return res.status(400).json({ success: false, message: "Email and Password , phone,firstName, lastName fields are required" });
   }
   if (password.length < 6) {
     return res.status(404).json({ success: false, message: "please put password more than 6 or equal to 6" })
@@ -38,6 +38,8 @@ const RegisterUser = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
     // 🔹 Update existing user
     const newUser = await UserAuthModal.create({
+      firstName: firstName,
+      lastName: lastName,
       email: normalizedEmail,
       phone,
       password: hashedPassword,
@@ -71,16 +73,18 @@ const LoginUser = async (req, res) => {
     if (!isMatch) {
       return res.status(400).json({ message: "Invalid password" });
     }
-    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: "2m" });
+    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: "30m" });
     user.isloginwithEmail = true;
+    user.verifytoken = token;
     const loginwithemailuser = {
       uid: user._id,
       email: user.email,
       name: `${user.firstName}`,
+      phone: user.phone,
       Mobile: user.isloginwithMobile,
       Google: user.isloginwithGoogle,
       Email: user.isloginwithEmail,
-      tokenData: user.verifytoken == null ? token : null
+      tokenData: user.verifytoken
     }
     await user.save();
     return res.status(200).json({ status: "success", message: "Login successful", loginwithemailuser });
@@ -91,36 +95,84 @@ const LoginUser = async (req, res) => {
 
 //login with Google 
 const loginwithGoogle = async (req, res) => {
+  try {
+    // Passport attaches user to req.user
+    const user = req.user;
+    // console.log("user", user)
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: "Google authentication failed",
+      });
+    }
 
+    // 🔹 Generate JWT
+    const token = jwt.sign(
+      { userId: user._id },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+    user.isloginwithGoogle = true;
+    res.status(200).json({
+      success: true,
+      message: "Login with Google successful",
+      token,
+      user: {
+        id: user._id,
+        email: user.email,
+        name: user.displayName,
+        photo: user.photo,
+        loginType: "GOOGLE",
+        Google: user.isloginwithGoogle
+      },
+    });
+    return res.redirect(
+      `http://localhost:3000/google-success?token=${token}`
+    );
+
+  } catch (error) {
+    console.error("Google Login Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
 }
 // login with Mobile and Otp 
 const loginwithmobile = async (req, res) => {
+  const { phone } = req.body;
   try {
-    const { phone } = req.body;
-    console.log(req.userId)
     if (!phone) {
       return res.status(400).json({ success: false, message: "Phone is required" });
     }
-    const existphone = await UserAuthModal.findOne({ phone });
-    if (existphone) {
-      return res.status(400).json({ success: false, message: `${phone} already exist here ` })
-    }
-    const user = await UserAuthModal.findOneAndUpdate(
-      {},                         // 👈 current user (or use userId)
-      {
-        phone: phone,
+    // check user
+    let user = await UserAuthModal.findOne({ phone });
+    // console.log("user",user._id)
+    if (!user) {
+      // create new user
+      user = await UserAuthModal.create({
+        phone,
         isloginwithMobile: true
-      },
-      {
-        new: true,
-        upsert: true
-      }
-    );
-    console.log("UPDATED USER:", user); // 👈 debug
+      });
+    }
 
+    // generate otp
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+    // update otp
+    await UserAuthModal.findOneAndUpdate(
+      { phone },
+      { otp, expiresAt },
+      { new: true }
+    );
+    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: "30m" });
+    user.isloginwithMobile = true;
+    user.verifytoken = token;
+    await user.save();
     return res.status(200).json({
       success: true,
-      message: "Phone updated successfully",
+      message: `${phone} : ${otp} sent successfully`,
       user
     });
 
@@ -134,43 +186,6 @@ const loginwithmobile = async (req, res) => {
 };
 
 
-// send otp handler
-const SendOtpVerification = async (req, res) => {
-  try {
-    const { phone } = req.body;
-    if (!phone) {
-      return res.status(400).json({ message: "Phone number required" });
-    }
-    // 🔍 STEP 1: Check phone in DB
-    const user = await UserAuthModal.findOne({ phone });
-    if (!user) {
-      return res.status(404).json({ message: `${phone} not found` })
-    }
-    // 🔐 STEP 2: Generate OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-
-    // 💾 STEP 3: Save OTP
-    await UserAuthModal.findOneAndUpdate(
-      { phone },
-      { otp, expiresAt }
-    );
-
-    console.log(`OTP for ${phone}: ${otp}`);
-
-    // 📤 STEP 4: Response
-    return res.status(200).json({
-      message: "OTP sent successfully",
-      status: "success",
-    });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({
-      message: "Failed to send OTP",
-    });
-  }
-};
 
 const handleOtpVerification = async (req, res) => {
   try {
@@ -198,7 +213,7 @@ const handleOtpVerification = async (req, res) => {
 
     // 🧹 clear OTP + save token
     user.otp = undefined;
-    user.expiresAt = undefined;
+    user.otpExpire = undefined;
     user.verifytoken = verifyToken;
     user.verifyTokenExpiry = Date.now() + 15 * 60 * 1000;
 
@@ -241,56 +256,45 @@ const ReSendOtpVerification = async (req, res) => {
 
 const logoutUser = async (req, res) => {
   try {
-    const userId = req.userId;      // from auth middleware
-    const expiretime = req.exp;     // jwt expiry
-    const token = req.token;        // current token
+    const userId = req.userId;
+    const expiretime = req.exp;
+    const token = req.token;
 
-    if (!userId || !token) {
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized request"
-      });
+    if (!userId || !token || !expiretime) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
     }
 
-    // 🔹 Find user
     const user = await UserAuthModal.findById(userId);
+    if (!user) return res.status(404).json({ message: `${userId}  not found` });
+    if (user.isloginwithMobile) user.logoutType = "Mobile";
+    if (user.isloginwithEmail) user.logoutType = "Email";
+    if (user.isloginwithGoogle) user.logoutType = "Google";
+    user.verifytoken = null;
+    await UserAuthModal.findByIdAndUpdate(userId, {
+      isloginwithMobile: false,
+      isloginwithEmail: false,
+      isloginwithGoogle: false,
+      verifytoken: user.verifytoken
+    });
 
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found"
-      });
-    }
-    // 🔹 Detect login type & cleanup
-    if (user.isloginwithMobile) {
-      user.logoutType = "Mobile";
-      user.phone = null; // 🔥 remove phone on logout
-    }
-    if (user.isloginwithEmail) {
-      user.logoutType = "Email";
-    }
-    if (user.isloginwithGoogle) { user.logoutType = "Google"; }
-
-    // 🔹 Reset all login flags
-    user.isloginwithMobile = false;
-    user.isloginwithEmail = false;
-    user.isloginwithGoogle = false;
-
-    await user.save();
-
-    // 🔹 Blacklist token
     await tokenModal.create({
       token,
       expiresAt: new Date(expiretime * 1000)
     });
-
+    // req.logout(() => {
+    //   req.session.destroy(() => {
+    //     // res.clearCookie("auth-session");
+    //     res.json({ success: true, message: "Logged out" });
+    //   });
+    // });
     return res.status(200).json({
       success: true,
-      message: `Logout successful from ${user.logoutType} `
+      message: `Logout successful from ${user.logoutType} login`
     });
 
   } catch (error) {
-    return res.status(500).json({ success: false, message: "Server error" });
+    // console.log("Logout Error:", error);
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -452,12 +456,32 @@ const resetPassword = async (req, res) => {
     return res.status(500).json({ status: "Something Went Wrong" });
   }
 };
+ 
+// userprofile
+const UserProfile = async(req,res)=>{
+   const userId = req.userId;
+  try {
+    const user = await UserAuthModal.findById(userId).select("-password");
+    if(!user){
+      return res.status(400).json({status:false, message:`${user.firstName} is not find`})
+    }
+    return res.status(200).json({status:true, message:"user ", user})
+  } catch (error) {
+    return res.status(500).json({status:false, message:"something went wrong", error})
+  }
+}
 
+const updateProfile = async(req,res)=>{
+  try {
+    
+  } catch (error) {
+    
+  }
+}
 module.exports = {
   RegisterUser,
   LoginUser,
   handleOtpVerification,
-  SendOtpVerification,
   ReSendOtpVerification,
   logoutUser,
   forgetPassword,
@@ -465,5 +489,7 @@ module.exports = {
   verifyforgetpwd,
   getStatesRead,
   loginwithGoogle,
-  loginwithmobile
+  loginwithmobile,
+  UserProfile,
+  updateProfile
 }

@@ -1,14 +1,20 @@
 const mongoose = require("mongoose");
 const userAuthSchema = new mongoose.Schema(
   {
-    email: { type: String , required:true},
-    password: { type: String, required:true, minLength:6},
-    phone:{ type :String,maxlength:10},
+    email: { type: String , required:function () {
+      return !this.isloginwithMobile;   
+    }},
+    password: { type: String, required:function () {
+      return !this.isloginwithMobile;  
+    }, minLength:6},
+    phone:{ type :String,maxlength:10,unique:true},
     token: { type: String },
     verifytoken: { type: String },
     firstName:{type:String},
     lastName:{type:String},
     state:{type:String},
+    companyname:{type:String},
+    role:{type:String},
     district:{type:String},
     city:{type: String},
     pincode:{type :String,minLength:6, maxLength:6},
@@ -16,6 +22,7 @@ const userAuthSchema = new mongoose.Schema(
     avatar:{type : String},
     coverAvatar:{type: String},
     logoutType:{type:String, enum:["Mobile","Google", "Email"]},
+    googleId:{type:String},
     isloginwithMobile:{type: Boolean, default:false},
     isloginwithGoogle:{type:Boolean, default:false},
     isloginwithEmail:{type:Boolean, default:false},
